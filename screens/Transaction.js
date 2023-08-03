@@ -2,7 +2,9 @@ import React, { Component } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Image, TextInput} from "react-native";
 import {Camera,Permissions} from "expo-camera";
 import {BarCodeScanner} from "expo-barcode-scanner";
-import firebase from "firebase"
+import { collection,addDoc, getDocs, doc, query,where,
+  updateDoc, serverTimestamp,increment, limit } 
+  from "firebase/firestore";
 import db from "../bancodedados.js"
 
 export default class TransactionScreen extends Component {
@@ -19,7 +21,11 @@ export default class TransactionScreen extends Component {
       escaniou:false,
       oqueescaniou:"",
       produto:"",
-      cliente:""
+      cliente:"",
+      nomeproduto:"",
+      nomecliente:"",
+      sobrenome:"",
+
     }
   }
 
@@ -122,17 +128,146 @@ export default class TransactionScreen extends Component {
     })
   }
   clicarbotao = async () => {
-  db.collection ("Mercadorias").doc (this.state.produto).get ().then (
-  dados => {
-  conjdados = dados.data ()
-  if (conjdados.disponibilidade){
-  alert("Transação concluída")
+ 
+    var {produto, cliente} = this.state
+
+    await this.pegarNomeProduto(produto)
+    await this.pegarNomeCliente(cliente)
+  
+    var produtodisponivel = await this.checarProdutoDisponivel(produto)
+    var estoquedisponivel = await this.checarProdutoDisponivelEstoque(produto)
+
+    if (!estoquedisponivel){
+      this.atualizarEstoque(produto)
+    }
+    else {
+      if(produtodisponivel){
+        var{nomecliente,nomeproduto,sobrenome} = this.state;
+        this.atualizarBd(produto,cliente,nomeproduto,nomecliente,sobrenome);
+      }
+    }
+
   }
-  else {
-  alert("Não concluída")
+
+
+  checarProdutoDisponivel = async(produto)=> {
+    
+    const procurar = query(collection(db,"Mercadorias"),where("id","==",produto.trim()))
+    const resposta = await(getDocs(procurar));
+  
+    var produtodisp = "";
+
+    if (resposta.empty){
+      produtodisp = false
+      alert("Esse id não existe no banco de dados")
+    }
+    else {
+       resposta.forEach((doc) => {
+          if(doc.data().disponível){
+            produtodisp = true
+            alert("Transação concluída")
+          }
+          else{
+            produtodisp = false
+            alert("Transação não concluída")
+          }
+        });
+    }
+    return produtodisp;
   }
+
+
+  atualizarBd = async (produto, cliente, nomeproduto, nomecliente, sobrenome) => {
+
+    const prodRef = doc(db, "Mercadorias",produto.trim());
+         await updateDoc(prodRef,{
+             estoque:increment(-1)
+         });
+
+    const clienteRef = doc(db, "Clientes",cliente.trim());
+        await updateDoc(clienteRef,{
+        quantprodutos:increment(1)
+        });
+
+        await addDoc(collection(db, "Transação"),{
+        idProduto:produto, 
+        nomeProduto:nomeproduto,
+        idCliente:cliente,
+        nomeCliente:nomecliente,
+        data:serverTimestamp(),
+        sobrenome:sobrenome
+        })
+
+         this.setState({
+          produto:"",
+          cliente:""
+         });
+
+         
   }
-  )
+    
+ checarProdutoDisponivelEstoque = async (produto) => {
+  var estoque =""
+  const procurar = query(collection(db,"Mercadorias"),where("id","==",produto.trim()))
+         const resposta = await(getDocs(procurar));
+
+         resposta.forEach((doc) => {
+          if(doc.data().estoque <= 0 ){
+            estoque = false;
+            alert("Acabou Estoque")
+          }
+          else {
+            estoque = true;
+          }
+        })
+  return estoque;
+ }
+
+ atualizarEstoque = async(produto) =>{
+
+    const prodRef = doc(db, "Mercadorias",produto.trim());
+    await updateDoc(prodRef,{
+        disponível:false
+    });
+
+    this.setState({
+    produto:"",
+    cliente:""
+    });
+
+ }
+  
+  
+
+  pegarNomeProduto = async (produto) =>{
+    const procurar = query(collection(db,"Mercadorias"),where("id","==",produto.trim()))
+    const resposta = await(getDocs(procurar));
+
+    if(!resposta.empty){
+        resposta.forEach((doc) => {
+            this.setState({
+                nomeproduto: doc.data().nome
+            });
+        });
+    }else{
+        alert("Produto não encontrado!");
+    }
+  }
+
+  pegarNomeCliente = async (cliente) =>{
+    const procurar = query(collection(db,"Clientes"),where("id","==",cliente.trim()))
+    const resposta = await(getDocs(procurar));
+
+    if(!resposta.empty){
+        resposta.forEach((doc) => {
+            this.setState({
+                nomecliente: doc.data().nome,
+                sobrenome: doc.data().sobrenome
+            });
+        });
+    }else{
+        alert("Cliente não encontrado!");
+    }
   }
 
 }
